@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, Receipt, BarChart3, Phone, Calendar, Check, ChevronLeft, ChevronRight, Clock, Wrench, X, PhoneCall, Tags, Trash2, Pencil, Minus, Boxes } from "lucide-react";
+import { Plus, Receipt, BarChart3, Phone, Calendar, Check, ChevronLeft, ChevronRight, Clock, Wrench, X, PhoneCall, Tags, Trash2, Pencil, Minus, Boxes, Home, ArrowLeft, MapPin } from "lucide-react";
 
 const INK = "#20291F";
 const PAPER = "#E9E7DC";
@@ -18,6 +18,7 @@ const fmtMonthLabel = (key) => {
 };
 const uid = () => Date.now() + Math.floor(Math.random() * 1000);
 const PAY_METHODS = ["現金", "匯款", "Line Pay", "月結"];
+const ci = (s) => (s || "").trim().toLowerCase();
 
 // 資料存進 localStorage，重新整理或不小心關掉網頁都不會遺失
 function usePersistentState(key, initial) {
@@ -69,32 +70,42 @@ function Stamp({ label, color }) {
 const inputStyle = { background: "#fff", border: `1.5px solid ${LINE}`, color: INK };
 const smallBtn = "px-2 py-1 rounded text-xs font-semibold flex items-center gap-1";
 
+const HOME_TILES = [
+  { id: "ledger", label: "記帳", icon: Receipt, color: COPPER },
+  { id: "inventory", label: "庫存盤點", icon: Boxes, color: COPPER },
+  { id: "calendar", label: "行事曆", icon: Calendar, color: TEAL },
+  { id: "catalog", label: "分類品項", icon: Tags, color: AMBER },
+  { id: "stats", label: "統計", icon: BarChart3, color: TEAL },
+  { id: "calls", label: "待辦電話", icon: Phone, color: AMBER },
+];
+
+const NAV_TABS = [
+  { id: "home", label: "首頁", icon: Home },
+  { id: "ledger", label: "記帳", icon: Receipt },
+  { id: "inventory", label: "庫存", icon: Boxes },
+  { id: "calendar", label: "行事曆", icon: Calendar },
+  { id: "catalog", label: "分類", icon: Tags },
+  { id: "stats", label: "統計", icon: BarChart3 },
+  { id: "calls", label: "電話", icon: Phone },
+];
+
 export default function CrewLedger() {
-  const [tab, setTab] = useState("ledger");
+  const [tab, setTab] = useState("home");
   const [entryType, setEntryType] = useState("expense");
 
-  const [catalog, setCatalog] = usePersistentState("cl_catalog", [
-    { id: 1, category: "水管材料", item: "PVC 管件", unit: "支" },
-    { id: 2, category: "水管材料", item: "止水閥", unit: "個" },
-    { id: 3, category: "電材", item: "電線 2.0mm", unit: "捲" },
-    { id: 4, category: "電材", item: "無熔絲開關", unit: "個" },
+  const [catalog, setCatalog] = usePersistentState("cl_catalog_v2", [
   ]);
 
-  const [materials, setMaterials] = usePersistentState("cl_materials", [
-    { id: 1, date: todayStr(), item: "PVC 管件", amount: 1250, category: "水管材料", quantity: 10, unit: "支" },
-    { id: 2, date: todayStr(), item: "電線 2.0mm", amount: 2380, category: "電材", quantity: 1, unit: "捲" },
+  const [materials, setMaterials] = usePersistentState("cl_materials_v2", [
   ]);
-  const [income, setIncome] = usePersistentState("cl_income", [
-    { id: 1, date: todayStr(), client: "陳先生 (漏水修繕)", amount: 4500, note: "含工資", method: "現金" },
+  const [income, setIncome] = usePersistentState("cl_income_v2", [
   ]);
-  const [calls, setCalls] = usePersistentState("cl_calls", [
-    { id: 1, receivedAt: todayStr(), client: "林小姐", phone: "0912-345-678", note: "浴室水龍頭漏水", status: "pending", date: "", time: "" },
-    { id: 2, receivedAt: todayStr(), client: "阿興水電行", phone: "0933-222-111", note: "廚房迴路跳電", status: "scheduled", date: todayStr(), time: "14:00" },
+  const [calls, setCalls] = usePersistentState("cl_calls_v2", [
   ]);
 
   const [form, setForm] = useState({ item: "", amount: "", category: "", quantity: "", unit: "", client: "", note: "", method: "現金" });
   const [showSuggest, setShowSuggest] = useState(false);
-  const [callForm, setCallForm] = useState({ client: "", phone: "", note: "" });
+  const [callForm, setCallForm] = useState({ client: "", phone: "", address: "", note: "" });
   const [scheduling, setScheduling] = useState(null);
   const [statMonth, setStatMonth] = useState(monthKey(todayStr()));
   const [catalogForm, setCatalogForm] = useState({ category: "", item: "", unit: "" });
@@ -103,25 +114,44 @@ export default function CrewLedger() {
   const [editing, setEditing] = useState(null); // { type: 'expense'|'income', id }
   const [editDraft, setEditDraft] = useState({});
 
+  const [callEditingId, setCallEditingId] = useState(null);
+  const [callEditDraft, setCallEditDraft] = useState({});
+
+  const [calMonth, setCalMonth] = useState(monthKey(todayStr()));
+  const [calSelected, setCalSelected] = useState(todayStr());
+
+  const goHome = () => setTab("home");
+
   const resetForm = () => setForm({ item: "", amount: "", category: "", quantity: "", unit: "", client: "", note: "", method: "現金" });
 
+  // 材料品項比對一律忽略英文大小寫
+  const findCatalogByItem = (name) => catalog.find((c) => ci(c.item) === ci(name));
+
   const upsertCatalog = (category, item, unit) => {
-    if (!item) return;
+    if (!item || !item.trim()) return;
     setCatalog((prev) => {
-      const exists = prev.some((c) => c.item === item);
-      if (exists) return prev.map((c) => (c.item === item ? { ...c, category: category || c.category, unit: unit || c.unit } : c));
-      return [...prev, { id: uid(), category: category || "其他材料", item, unit: unit || "" }];
+      const idx = prev.findIndex((c) => ci(c.item) === ci(item));
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], category: category || copy[idx].category, unit: unit || copy[idx].unit };
+        return copy;
+      }
+      return [...prev, { id: uid(), category: category || "其他材料", item: item.trim(), unit: unit || "" }];
     });
   };
 
   const submitEntry = () => {
     if (entryType === "expense") {
       if (!form.item || !form.amount) return;
+      const match = findCatalogByItem(form.item);
+      const finalItem = match ? match.item : form.item.trim();
+      const finalCategory = form.category || (match ? match.category : "其他材料");
+      const finalUnit = form.unit || (match ? match.unit : "");
       setMaterials((m) => [
-        { id: uid(), date: todayStr(), item: form.item, amount: Number(form.amount), category: form.category || "其他材料", quantity: form.quantity ? Number(form.quantity) : 1, unit: form.unit || "" },
+        { id: uid(), date: todayStr(), item: finalItem, amount: Number(form.amount), category: finalCategory, quantity: form.quantity ? Number(form.quantity) : "", unit: finalUnit },
         ...m,
       ]);
-      upsertCatalog(form.category, form.item, form.unit);
+      upsertCatalog(finalCategory, finalItem, finalUnit);
     } else {
       if (!form.client || !form.amount) return;
       setIncome((i) => [{ id: uid(), date: todayStr(), client: form.client, amount: Number(form.amount), note: form.note, method: form.method || "現金" }, ...i]);
@@ -131,8 +161,8 @@ export default function CrewLedger() {
 
   const itemSuggestions = useMemo(() => {
     if (!form.item) return [];
-    const q = form.item.trim();
-    return catalog.filter((c) => c.item.includes(q)).slice(0, 6);
+    const q = ci(form.item);
+    return catalog.filter((c) => ci(c.item).includes(q)).slice(0, 6);
   }, [form.item, catalog]);
 
   const pickSuggestion = (c) => {
@@ -142,8 +172,8 @@ export default function CrewLedger() {
 
   const submitCall = () => {
     if (!callForm.client) return;
-    setCalls((c) => [{ id: uid(), receivedAt: todayStr(), client: callForm.client, phone: callForm.phone, note: callForm.note, status: "pending", date: "", time: "" }, ...c]);
-    setCallForm({ client: "", phone: "", note: "" });
+    setCalls((c) => [{ id: uid(), receivedAt: todayStr(), client: callForm.client, phone: callForm.phone, address: callForm.address, note: callForm.note, status: "pending", date: "", time: "" }, ...c]);
+    setCallForm({ client: "", phone: "", address: "", note: "" });
   };
 
   const confirmSchedule = (id, date, time) => {
@@ -151,6 +181,25 @@ export default function CrewLedger() {
     setScheduling(null);
   };
   const completeCall = (id) => setCalls((cs) => cs.map((c) => (c.id === id ? { ...c, status: "done" } : c)));
+
+  const startCallEdit = (c) => {
+    setCallEditingId(c.id);
+    setCallEditDraft({ ...c });
+  };
+  const cancelCallEdit = () => {
+    setCallEditingId(null);
+    setCallEditDraft({});
+  };
+  const saveCallEdit = () => {
+    setCalls((cs) =>
+      cs.map((c) =>
+        c.id === callEditingId
+          ? { ...c, client: callEditDraft.client, phone: callEditDraft.phone, address: callEditDraft.address, note: callEditDraft.note }
+          : c
+      )
+    );
+    cancelCallEdit();
+  };
 
   const addCatalogEntry = () => {
     if (!catalogForm.item) return;
@@ -235,9 +284,39 @@ export default function CrewLedger() {
     setStatMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   };
 
+  const shiftCalMonth = (dir) => {
+    const [y, m] = calMonth.split("-").map(Number);
+    const d = new Date(y, m - 1 + dir, 1);
+    setCalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  };
+
+  const calendarCells = useMemo(() => {
+    const [y, m] = calMonth.split("-").map(Number);
+    const firstWeekday = new Date(y, m - 1, 1).getDay();
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < firstWeekday; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+    return cells;
+  }, [calMonth]);
+
+  const dayHasData = (dateStr) => ({
+    expense: materials.some((m) => m.date === dateStr),
+    income: income.some((i) => i.date === dateStr),
+    call: calls.some((c) => c.status === "scheduled" && c.date === dateStr),
+  });
+
+  const selectedDayExpenses = useMemo(() => materials.filter((m) => m.date === calSelected).sort((a, b) => b.id - a.id), [materials, calSelected]);
+  const selectedDayIncome = useMemo(() => income.filter((i) => i.date === calSelected).sort((a, b) => b.id - a.id), [income, calSelected]);
+  const selectedDayCalls = useMemo(
+    () => calls.filter((c) => c.status === "scheduled" && c.date === calSelected).sort((a, b) => (b.time || "").localeCompare(a.time || "")),
+    [calls, calSelected]
+  );
+
   const todayEntries = [...materials, ...income].filter((e) => e.date === todayStr()).sort((a, b) => b.id - a.id);
 
-  return (
+  const showBack = tab !== "home";
+    return (
     <div className="w-full min-h-screen flex flex-col" style={{ background: PAPER_DARK, color: INK, fontFamily: "'IBM Plex Sans', sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
@@ -245,15 +324,38 @@ export default function CrewLedger() {
         .display { font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.02em; }
       `}</style>
 
-      <div className="px-5 pt-6 pb-4" style={{ background: INK, color: PAPER }}>
-        <div className="flex items-center gap-2">
-          <Wrench size={20} style={{ color: AMBER }} />
-          <h1 className="display text-2xl font-bold tracking-wide">工班日誌</h1>
+      <div className="px-5 pt-6 pb-4 flex items-center gap-3" style={{ background: INK, color: PAPER }}>
+        {showBack && (
+          <button onClick={goHome} className="p-1.5 rounded" style={{ background: "rgba(255,255,255,0.1)" }}>
+            <ArrowLeft size={18} />
+          </button>
+        )}
+        <div>
+          <div className="flex items-center gap-2">
+            <Wrench size={20} style={{ color: AMBER }} />
+            <h1 className="display text-2xl font-bold tracking-wide">工班日誌</h1>
+          </div>
+          <p className="text-xs mt-1 opacity-70">材料 · 收支 · 電話待辦，一本記清楚</p>
         </div>
-        <p className="text-xs mt-1 opacity-70">材料 · 收支 · 電話待辦，一本記清楚</p>
       </div>
 
       <div className="flex-1 px-4 py-4 pb-24 max-w-md mx-auto w-full">
+        {tab === "home" && (
+          <div className="grid grid-cols-2 gap-3 mt-2">
+            {HOME_TILES.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className="flex flex-col items-center justify-center gap-2 py-6 rounded-lg"
+                style={{ background: PAPER, border: `1.5px solid ${LINE}` }}
+              >
+                <t.icon size={26} style={{ color: t.color }} />
+                <span className="text-sm font-semibold display tracking-wide">{t.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {tab === "ledger" && (
           <div>
             <div className="flex rounded-md overflow-hidden mb-4" style={{ border: `1.5px solid ${INK}` }}>
@@ -271,7 +373,7 @@ export default function CrewLedger() {
                   <>
                     <div className="relative">
                       <input
-                        placeholder="材料品項（例：PVC 管件）— 輸入一字自動帶出"
+                        placeholder="材料品項（例：PVC 管件）"
                         value={form.item}
                         onChange={(e) => { setForm({ ...form, item: e.target.value }); setShowSuggest(true); }}
                         onFocus={() => setShowSuggest(true)}
@@ -429,6 +531,93 @@ export default function CrewLedger() {
           </div>
         )}
 
+        {tab === "calendar" && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <button onClick={() => shiftCalMonth(-1)} className="p-2 rounded" style={{ background: PAPER, border: `1px solid ${LINE}` }}><ChevronLeft size={18} /></button>
+              <span className="display text-lg font-semibold">{fmtMonthLabel(calMonth)}</span>
+              <button onClick={() => shiftCalMonth(1)} className="p-2 rounded" style={{ background: PAPER, border: `1px solid ${LINE}` }}><ChevronRight size={18} /></button>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 mb-1 text-center">
+              {["日", "一", "二", "三", "四", "五", "六"].map((d) => (
+                <span key={d} className="text-[10px] opacity-50 font-semibold">{d}</span>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-1 mb-4">
+              {calendarCells.map((dateStr, idx) => {
+                if (!dateStr) return <div key={idx} />;
+                const flags = dayHasData(dateStr);
+                const isSelected = dateStr === calSelected;
+                const isToday = dateStr === todayStr();
+                return (
+                  <button
+                    key={dateStr}
+                    onClick={() => setCalSelected(dateStr)}
+                    className="aspect-square rounded flex flex-col items-center justify-center gap-0.5"
+                    style={{
+                      background: isSelected ? INK : "#fff",
+                      color: isSelected ? PAPER : INK,
+                      border: isToday ? `1.5px solid ${AMBER}` : `1px solid ${LINE}`,
+                    }}
+                  >
+                    <span className="text-xs">{Number(dateStr.slice(-2))}</span>
+                    <span className="flex gap-0.5">
+                      {flags.expense && <span className="w-1 h-1 rounded-full inline-block" style={{ background: COPPER }} />}
+                      {flags.income && <span className="w-1 h-1 rounded-full inline-block" style={{ background: TEAL }} />}
+                      {flags.call && <span className="w-1 h-1 rounded-full inline-block" style={{ background: AMBER }} />}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-xs font-semibold opacity-60 display tracking-wider mb-2">{calSelected} 的紀錄</p>
+
+            <div className="mb-3">
+              <p className="text-xs font-semibold mb-1.5 flex items-center gap-1" style={{ color: COPPER }}><span className="w-2 h-2 rounded-full inline-block" style={{ background: COPPER }} />進貨支出</p>
+              <div className="space-y-1.5">
+                {selectedDayExpenses.map((m) => (
+                  <div key={m.id} className="px-3 py-2 rounded text-sm flex justify-between" style={{ background: PAPER, border: `1px solid ${LINE}` }}>
+                    <span>{m.item} <span className="text-xs opacity-50">{m.quantity}{m.unit}</span></span>
+                    <span className="mono font-semibold" style={{ color: COPPER }}>{fmtMoney(m.amount)}</span>
+                  </div>
+                ))}
+                {selectedDayExpenses.length === 0 && <p className="text-xs opacity-40 px-1">無資料</p>}
+              </div>
+            </div>
+
+            <div className="mb-3">
+              <p className="text-xs font-semibold mb-1.5 flex items-center gap-1" style={{ color: TEAL }}><span className="w-2 h-2 rounded-full inline-block" style={{ background: TEAL }} />收款收入</p>
+              <div className="space-y-1.5">
+                {selectedDayIncome.map((i) => (
+                  <div key={i.id} className="px-3 py-2 rounded text-sm flex justify-between" style={{ background: PAPER, border: `1px solid ${LINE}` }}>
+                    <span>{i.client} <span className="text-xs opacity-50">{i.method}</span></span>
+                    <span className="mono font-semibold" style={{ color: TEAL }}>{fmtMoney(i.amount)}</span>
+                  </div>
+                ))}
+                {selectedDayIncome.length === 0 && <p className="text-xs opacity-40 px-1">無資料</p>}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold mb-1.5 flex items-center gap-1" style={{ color: AMBER }}><span className="w-2 h-2 rounded-full inline-block" style={{ background: AMBER }} />待辦電話（已安排）</p>
+              <div className="space-y-1.5">
+                {selectedDayCalls.map((c) => (
+                  <div key={c.id} className="px-3 py-2 rounded text-sm" style={{ background: PAPER, border: `1px solid ${LINE}` }}>
+                    <div className="flex justify-between">
+                      <span>{c.client}</span>
+                      <span className="mono font-semibold" style={{ color: AMBER }}>{c.time}</span>
+                    </div>
+                    {c.note && <p className="text-xs opacity-60">{c.note}</p>}
+                  </div>
+                ))}
+                {selectedDayCalls.length === 0 && <p className="text-xs opacity-40 px-1">無資料</p>}
+              </div>
+            </div>
+          </div>
+        )}
+
         {tab === "catalog" && (
           <div>
             <Stub>
@@ -445,7 +634,7 @@ export default function CrewLedger() {
               </div>
             </Stub>
 
-            <p className="text-xs opacity-50 mt-3 mb-3">在「進貨支出」輸入品項時會自動帶出這裡的資料；新增支出紀錄也會自動存進這張表。</p>
+            <p className="text-xs opacity-50 mt-3 mb-3">在「進貨支出」輸入品項時會自動帶出這裡的資料（不分英文大小寫）；新增支出紀錄也會自動存進這張表。</p>
 
             <div className="space-y-4">
               {Object.keys(catalogByCategory).length === 0 && <p className="text-sm opacity-50 py-4 text-center">還沒有任何品項</p>}
@@ -515,6 +704,21 @@ export default function CrewLedger() {
 
         {tab === "calls" && (
           <div>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="p-2.5 rounded text-center" style={{ background: "#FBEFDA", border: `1.5px solid ${AMBER}` }}>
+                <p className="text-lg font-bold mono" style={{ color: AMBER }}>{pendingCalls.length}</p>
+                <p className="text-[10px] opacity-70">尚未安排</p>
+              </div>
+              <div className="p-2.5 rounded text-center" style={{ background: PAPER, border: `1.5px solid ${TEAL}` }}>
+                <p className="text-lg font-bold mono" style={{ color: TEAL }}>{scheduledCalls.length}</p>
+                <p className="text-[10px] opacity-70">已安排</p>
+              </div>
+              <div className="p-2.5 rounded text-center" style={{ background: PAPER, border: `1.5px solid ${LINE}` }}>
+                <p className="text-lg font-bold mono opacity-60">{doneCalls.length}</p>
+                <p className="text-[10px] opacity-70">已完成</p>
+              </div>
+            </div>
+
             <Stub>
               <div className="p-4 pt-5 space-y-2">
                 <p className="text-xs font-semibold opacity-60 display tracking-wider mb-1 flex items-center gap-1">
@@ -522,6 +726,7 @@ export default function CrewLedger() {
                 </p>
                 <input placeholder="客戶名稱" value={callForm.client} onChange={(e) => setCallForm({ ...callForm, client: e.target.value })} className="w-full px-3 py-2 rounded text-sm outline-none" style={inputStyle} />
                 <input placeholder="電話（選填）" value={callForm.phone} onChange={(e) => setCallForm({ ...callForm, phone: e.target.value })} className="w-full px-3 py-2 rounded text-sm outline-none mono" style={inputStyle} />
+                <input placeholder="地址（選填）" value={callForm.address} onChange={(e) => setCallForm({ ...callForm, address: e.target.value })} className="w-full px-3 py-2 rounded text-sm outline-none" style={inputStyle} />
                 <div className="flex gap-2">
                   <input placeholder="需求（例：漏水 / 跳電）" value={callForm.note} onChange={(e) => setCallForm({ ...callForm, note: e.target.value })} className="flex-1 px-3 py-2 rounded text-sm outline-none" style={inputStyle} />
                   <button onClick={submitCall} className="px-4 rounded font-semibold text-sm text-white" style={{ background: AMBER }}><Plus size={16} /></button>
@@ -535,17 +740,36 @@ export default function CrewLedger() {
                 <div className="space-y-2">
                   {pendingCalls.map((c) => (
                     <div key={c.id} className="p-3 rounded" style={{ background: "#FBEFDA", border: `1.5px solid ${AMBER}` }}>
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="text-sm font-semibold">{c.client}</p>
-                          {c.phone && <p className="text-xs mono opacity-70">{c.phone}</p>}
-                          {c.note && <p className="text-xs opacity-70 mt-0.5">{c.note}</p>}
+                      {callEditingId === c.id ? (
+                        <div className="space-y-2">
+                          <input value={callEditDraft.client} onChange={(e) => setCallEditDraft({ ...callEditDraft, client: e.target.value })} className="w-full px-2 py-1.5 rounded text-sm outline-none" style={inputStyle} placeholder="客戶名稱" />
+                          <input value={callEditDraft.phone} onChange={(e) => setCallEditDraft({ ...callEditDraft, phone: e.target.value })} className="w-full px-2 py-1.5 rounded text-sm outline-none mono" style={inputStyle} placeholder="電話" />
+                          <input value={callEditDraft.address || ""} onChange={(e) => setCallEditDraft({ ...callEditDraft, address: e.target.value })} className="w-full px-2 py-1.5 rounded text-sm outline-none" style={inputStyle} placeholder="地址" />
+                          <input value={callEditDraft.note} onChange={(e) => setCallEditDraft({ ...callEditDraft, note: e.target.value })} className="w-full px-2 py-1.5 rounded text-sm outline-none" style={inputStyle} placeholder="需求" />
+                          <div className="flex gap-2">
+                            <button onClick={saveCallEdit} className={smallBtn + " text-white"} style={{ background: TEAL }}><Check size={13} /> 儲存</button>
+                            <button onClick={cancelCallEdit} className={smallBtn} style={{ background: "#fff", border: `1px solid ${LINE}` }}><X size={13} /> 取消</button>
+                          </div>
                         </div>
-                        <button onClick={() => setScheduling(scheduling === c.id ? null : c.id)} className="text-xs px-2 py-1 rounded flex items-center gap-1 text-white shrink-0" style={{ background: AMBER }}>
-                          <Calendar size={12} /> 安排
-                        </button>
-                      </div>
-                      {scheduling === c.id && <ScheduleRow onConfirm={(d, t) => confirmSchedule(c.id, d, t)} />}
+                      ) : (
+                        <>
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="text-sm font-semibold">{c.client}</p>
+                              {c.phone && <p className="text-xs mono opacity-70">{c.phone}</p>}
+                              {c.address && <p className="text-xs opacity-70 flex items-center gap-1"><MapPin size={10} />{c.address}</p>}
+                              {c.note && <p className="text-xs opacity-70 mt-0.5">{c.note}</p>}
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button onClick={() => startCallEdit(c)} className="p-1.5 rounded" style={{ background: "#fff", border: `1px solid ${LINE}` }}><Pencil size={12} /></button>
+                              <button onClick={() => setScheduling(scheduling === c.id ? null : c.id)} className="text-xs px-2 py-1 rounded flex items-center gap-1 text-white" style={{ background: AMBER }}>
+                                <Calendar size={12} /> 安排
+                              </button>
+                            </div>
+                          </div>
+                          {scheduling === c.id && <ScheduleRow onConfirm={(d, t) => confirmSchedule(c.id, d, t)} />}
+                        </>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -557,13 +781,32 @@ export default function CrewLedger() {
                 <p className="text-xs font-semibold display tracking-wider mb-2" style={{ color: TEAL }}>已安排</p>
                 <div className="space-y-2">
                   {scheduledCalls.map((c) => (
-                    <div key={c.id} className="p-3 rounded flex justify-between items-center" style={{ background: PAPER, border: `1px solid ${LINE}` }}>
-                      <div>
-                        <p className="text-sm font-semibold">{c.client}</p>
-                        <p className="text-xs opacity-70">{c.note}</p>
-                        <p className="text-xs mono mt-1 flex items-center gap-1" style={{ color: TEAL }}><Clock size={11} /> {c.date} {c.time}</p>
-                      </div>
-                      <button onClick={() => completeCall(c.id)} className="p-2 rounded" style={{ background: TEAL, color: "#fff" }}><Check size={14} /></button>
+                    <div key={c.id} className="p-3 rounded" style={{ background: PAPER, border: `1px solid ${LINE}` }}>
+                      {callEditingId === c.id ? (
+                        <div className="space-y-2">
+                          <input value={callEditDraft.client} onChange={(e) => setCallEditDraft({ ...callEditDraft, client: e.target.value })} className="w-full px-2 py-1.5 rounded text-sm outline-none" style={inputStyle} placeholder="客戶名稱" />
+                          <input value={callEditDraft.phone} onChange={(e) => setCallEditDraft({ ...callEditDraft, phone: e.target.value })} className="w-full px-2 py-1.5 rounded text-sm outline-none mono" style={inputStyle} placeholder="電話" />
+                          <input value={callEditDraft.address || ""} onChange={(e) => setCallEditDraft({ ...callEditDraft, address: e.target.value })} className="w-full px-2 py-1.5 rounded text-sm outline-none" style={inputStyle} placeholder="地址" />
+                          <input value={callEditDraft.note} onChange={(e) => setCallEditDraft({ ...callEditDraft, note: e.target.value })} className="w-full px-2 py-1.5 rounded text-sm outline-none" style={inputStyle} placeholder="需求" />
+                          <div className="flex gap-2">
+                            <button onClick={saveCallEdit} className={smallBtn + " text-white"} style={{ background: TEAL }}><Check size={13} /> 儲存</button>
+                            <button onClick={cancelCallEdit} className={smallBtn} style={{ background: "#fff", border: `1px solid ${LINE}` }}><X size={13} /> 取消</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <p className="text-sm font-semibold">{c.client}</p>
+                            {c.address && <p className="text-xs opacity-70 flex items-center gap-1"><MapPin size={10} />{c.address}</p>}
+                            <p className="text-xs opacity-70">{c.note}</p>
+                            <p className="text-xs mono mt-1 flex items-center gap-1" style={{ color: TEAL }}><Clock size={11} /> {c.date} {c.time}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button onClick={() => startCallEdit(c)} className="p-1.5 rounded" style={{ background: "#fff", border: `1px solid ${LINE}` }}><Pencil size={12} /></button>
+                            <button onClick={() => completeCall(c.id)} className="p-2 rounded" style={{ background: TEAL, color: "#fff" }}><Check size={14} /></button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -586,18 +829,12 @@ export default function CrewLedger() {
 
       <div className="fixed bottom-0 left-0 right-0 flex justify-center" style={{ background: INK }}>
         <div className="max-w-md w-full flex" style={{ paddingBottom: "env(safe-area-inset-bottom, 0)" }}>
-          {[
-            { id: "ledger", label: "記帳", icon: Receipt },
-            { id: "inventory", label: "庫存盤點", icon: Boxes },
-            { id: "catalog", label: "分類品項", icon: Tags },
-            { id: "stats", label: "統計", icon: BarChart3 },
-            { id: "calls", label: "待辦電話", icon: Phone, badge: pendingCalls.length },
-          ].map((t) => (
+          {NAV_TABS.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)} className="flex-1 flex flex-col items-center gap-1 py-3 relative" style={{ color: tab === t.id ? AMBER : "#8C9186" }}>
-              <t.icon size={17} />
+              <t.icon size={16} />
               <span className="text-[9px] display tracking-wide">{t.label}</span>
-              {t.badge > 0 && (
-                <span className="absolute top-1 right-[16%] w-4 h-4 rounded-full text-[10px] flex items-center justify-center text-white font-bold" style={{ background: COPPER }}>{t.badge}</span>
+              {t.id === "calls" && pendingCalls.length > 0 && (
+                <span className="absolute top-1 right-[16%] w-4 h-4 rounded-full text-[10px] flex items-center justify-center text-white font-bold" style={{ background: COPPER }}>{pendingCalls.length}</span>
               )}
             </button>
           ))}
